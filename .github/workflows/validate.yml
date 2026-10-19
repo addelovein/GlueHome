@@ -31,3 +31,10 @@ jobs:
           python-version: '3.14'
       - run: pip install --upgrade 'esphome>=2026.9.1'
       - run: python tools/validate_esphome.py --compile
+  addon-tools-in-sync:
+    # The HA add-on bundles a copy of tools/ (a GitHub-installed add-on builds
+    # from its own folder and can't reach ../tools). Fail if the copy drifts.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: diff -r --exclude=__pycache__ tools glue-refill/tools
