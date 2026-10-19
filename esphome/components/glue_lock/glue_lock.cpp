@@ -55,16 +55,23 @@ void GlueLockHub::loop() {
   // Proceed as soon as HOST_READY acks the wake (0x01); fall back to a timed wait so a
   // firmware that acks differently still advances rather than stalling to OP_TIMEOUT_MS.
   if (!wake_acked_ && millis() - op_started_ms_ < WAKE_DELAY_MS) return;
+  reserve_and_login_();
+}
+// Reserve the lowest available key, persist the reservation, and send LOGIN. The
+// reservation (PENDING + burn tombstone) is persisted BEFORE any LOGIN bytes so a
+// reset, rejected login or uncertain response can never permit the key's reuse.
+// Returns false (and fails the op) if no key is available or persistence fails.
+bool GlueLockHub::reserve_and_login_() {
   auto *key = next_unconsumed_key_();
-  if (!key) { fail_op_("no keys available"); return; }
-  // Reserve and synchronously persist BEFORE sending any LOGIN bytes. A reset,
-  // rejected login or uncertain response must never permit this key's reuse.
+  if (!key) { fail_op_("no keys available"); return false; }
   key->state = KeyState::PENDING;
   bank_.burned_through = key->index;
   bank_.has_burned = true;
-  if (!save_bank_()) { fail_op_("could not reserve key"); return; }
+  if (!save_bank_()) { fail_op_("could not reserve key"); return false; }
+  ++login_attempts_;
   op_state_ = Op::LOGIN;
   send_frame_(glue::CMD_LOG_IN, key->key, KEY_LEN);
+  return true;
 }
 void GlueLockHub::dump_config() {
   ESP_LOGCONFIG(TAG, "Glue lock: %d keys, durable bank %s", keys_remaining(), bank_healthy_ ? "OK" : "FAILED");
@@ -156,8 +163,11 @@ std::string GlueLockHub::bank_status() const {
     first = false;
     s += std::to_string(bank_.keys[i].index);
   }
+  // "stale":true means the last unlock exhausted the KEY_EXPIRED retry cap — HA
+  // should refill and retry. It clears when the next operation begins.
   return s + "],\"paused\":" + (bank_.paused ? "true" : "false") +
-      ",\"floor\":" + (bank_.has_burned ? std::to_string(bank_.burned_through) : "-1") + "}";
+      ",\"floor\":" + (bank_.has_burned ? std::to_string(bank_.burned_through) : "-1") +
+      ",\"stale\":" + (bank_stale_ ? "true" : "false") + "}";
 }
 void GlueLockHub::request_unlock() { begin_operation_(glue::OP_UNLOCK); }
 void GlueLockHub::request_lock() { begin_operation_(glue::OP_LOCK); }
@@ -172,6 +182,8 @@ void GlueLockHub::begin_operation_(uint8_t op) {
   for (auto &b : challenge_) b = static_cast<uint8_t>(random_uint32());
   rx_buf_.clear();
   wake_acked_ = false;
+  login_attempts_ = 0;
+  bank_stale_ = false;
   op_started_ms_ = millis();
   op_state_ = Op::WAKE;
   if (lock_) lock_->publish_state(op == glue::OP_LOCK ? lock::LOCK_STATE_LOCKING : lock::LOCK_STATE_UNLOCKING);
@@ -275,9 +287,28 @@ void GlueLockHub::handle_frame_(uint8_t cmd, const uint8_t *chal, const std::vec
   std::memcpy(challenge_, chal, 3);
   const uint8_t status = payload[0];
   if (op_state_ == Op::LOGIN) {
-    if (status != glue::R_SUCCESS) { fail_op_("login rejected"); return; }
-    op_state_ = Op::OPERATE;
-    send_frame_(glue::CMD_OPERATE, &pending_operate_, 1);
+    if (status == glue::R_SUCCESS) {
+      op_state_ = Op::OPERATE;
+      send_frame_(glue::CMD_OPERATE, &pending_operate_, 1);
+      return;
+    }
+    // KEY_EXPIRED means another controller already burned this key. The reserved
+    // key stays marked for burn-report; try the next banked key in this same
+    // session, capped so a fully stale bank can't drain the whole pool at once.
+    if (status == glue::R_KEY_EXPIRED && login_attempts_ < MAX_LOGIN_ATTEMPTS) {
+      ESP_LOGW(TAG, "Key expired; trying next banked key (attempt %u)", login_attempts_ + 1);
+      rx_buf_.clear();
+      if (reserve_and_login_()) return;  // fail_op_ already ran if no key/persist failed
+      return;
+    }
+    if (status == glue::R_KEY_EXPIRED) {
+      // Exhausted the retry cap on stale keys: signal HA to refill and retry.
+      bank_stale_ = true;
+      fail_op_("keys stale; refill needed");
+      return;
+    }
+    fail_op_("login rejected");
+    return;
   } else if (op_state_ == Op::OPERATE) {
     bool locked = pending_operate_ == glue::OP_LOCK;
     if (status == glue::R_SUCCESS || (locked && status == glue::R_LOCK_IS_LOCKED) ||
