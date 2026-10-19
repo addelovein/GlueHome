@@ -11,7 +11,7 @@ to copy.
 3. Paste this repository's URL and press **Add**, then close:
 
    ```
-   https://github.com/YOUR_GITHUB/GlueHome
+   https://github.com/addelovein/GlueHome
    ```
 
 4. Back in the store, scroll to **Glue lock add-ons → Glue key-refill**, open it,
