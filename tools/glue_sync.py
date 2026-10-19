@@ -136,6 +136,13 @@ def sync_once(controller=None):
             if not bank['pending']:
                 ha_request(service + '_resume_keys', {})
             return False
+        # Nothing to do: ESPHome already owns a full bank with no burns to report.
+        # Skip all Glue cloud calls so an idle lock polls only local HA, never the
+        # (abandoned) Glue server. We act on Glue only after an actual unlock.
+        MAX_BANK = 5
+        if (glue_store.get('controller-' + lock_id) == 'esphome'
+                and not bank['pending'] and len(bank['available']) >= MAX_BANK):
+            return True
         # Handoff waits for any CLI session to finish. Persist ownership BEFORE
         # handing keys to ESPHome; Python BLE cannot subsequently reuse them.
         with locked('ble-' + lock_id):
