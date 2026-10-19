@@ -1,0 +1,5 @@
+# Refill-worker deps only. No bleak (no BLE in the container), no keyring
+# (no OS vault — secrets come from env + the encrypted /data store), no esphome.
+boto3
+pycognito
+cryptography>=43

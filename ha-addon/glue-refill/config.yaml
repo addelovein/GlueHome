@@ -1,0 +1,42 @@
+# Home Assistant local add-on: Glue key-refill worker.
+# Runs tools/glue.py sync --watch in a supervised container. Holds Glue account
+# credentials and refills the ESP32's single-use key bank over HA's API. The
+# ESP32 itself never holds credentials and never touches the cloud.
+name: Glue key-refill worker
+version: "0.1.0"
+slug: glue_refill
+description: Refills the ESPHome Glue lock's single-use key pool via Home Assistant.
+arch:
+  - aarch64
+  - amd64
+  - armv7
+# Needs network (Cognito + HA API). No GPIO/USB/BLE: refill is network-only.
+hassio_api: false
+homeassistant_api: false
+host_network: false
+# /data persists across restarts/updates — the encrypted store, key bank and
+# controller-ownership record live here. The data directory is always mapped and
+# writable, so no explicit map entry is needed.
+options:
+  ha_url: "http://homeassistant:8123"
+  ha_device: "glue-entrance"
+  ha_bank_entity: "sensor.glue_bank_status"
+  lock_id: ""
+  lock_serial: ""
+  glue_username: ""
+  interval_seconds: 30
+  log_level: "info"
+schema:
+  # Secrets below are write-only in the UI. ha_token / glue_password / storage_key
+  # are passwords; never commit them anywhere.
+  ha_url: "url"
+  ha_token: "password"
+  ha_device: "match(^[a-z0-9][a-z0-9-]*$)"
+  ha_bank_entity: "match(^sensor\\.[a-z0-9_]+$)"
+  lock_id: "match(^[0-9a-fA-F-]{36}$)"
+  lock_serial: "str"
+  glue_username: "str"
+  glue_password: "password"
+  storage_key: "password"
+  interval_seconds: "int(5,3600)"
+  log_level: "list(debug|info|warning|error)"
