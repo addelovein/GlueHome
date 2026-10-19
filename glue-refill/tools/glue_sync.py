@@ -5,6 +5,7 @@ GLUE_HA_URL (HTTPS), GLUE_HA_TOKEN, GLUE_HA_DEVICE (ESPHome node name),
 GLUE_HA_BANK_ENTITY (sensor entity ID). This worker never operates the motor.
 """
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -26,6 +27,23 @@ def _required(name):
     return value
 
 
+_INTERNAL_HOSTNAMES = ('localhost', 'homeassistant', 'supervisor', 'hassio')
+
+
+def _is_local_host(hostname):
+    """True if plain HTTP to this host stays on the local network: an internal
+    add-on hostname, or a private / loopback / link-local IP address."""
+    if not hostname:
+        return False
+    if hostname in _INTERNAL_HOSTNAMES:
+        return True
+    try:
+        ip = ipaddress.ip_address(hostname.strip('[]'))
+    except ValueError:
+        return False  # a bare public hostname must use HTTPS
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
 def _ha_endpoint():
     """Return (base_api_url, bearer_token). Inside an HA add-on, default to the
     Supervisor's Core API proxy (http://supervisor/core/api) with SUPERVISOR_TOKEN
@@ -40,11 +58,12 @@ def _ha_endpoint():
         raise RuntimeError('Set GLUE_HA_URL + GLUE_HA_TOKEN, or run inside an HA add-on (SUPERVISOR_TOKEN)')
     base = url.rstrip('/')
     parsed = urlsplit(base)
-    # Permit plain HTTP only on loopback or HA's internal hostnames — container-
-    # private networking that never leaves the host. Anything else must use HTTPS.
-    _http_ok = ('localhost', '127.0.0.1', '::1', 'homeassistant', 'supervisor', 'hassio')
-    if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in _http_ok):
-        raise ValueError('Use HTTPS for remote HA, or HTTP on an internal host')
+    # Plain HTTP is permitted only to a host that stays on the local network:
+    # loopback, HA's internal add-on hostnames, or a private/link-local IP
+    # (RFC 1918 / RFC 4193 / loopback). A public host must use HTTPS so the
+    # bearer token is never sent in clear text over the open internet.
+    if parsed.scheme != 'https' and not (parsed.scheme == 'http' and _is_local_host(parsed.hostname)):
+        raise ValueError('Use HTTPS for a public HA, or HTTP only on a local/private address')
     if not token:
         raise RuntimeError('GLUE_HA_TOKEN is required with GLUE_HA_URL')
     return base + '/api', token
