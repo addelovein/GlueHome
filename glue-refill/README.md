@@ -55,6 +55,13 @@ command on your computer stops unlocking (so the two can't fight over the same
 one-time key). To unlock from your computer again, stop this add-on and run
 `python3 tools/glue.py sync --controller ble --watch`.
 
+**Self-healing when keys go stale:** if you unlock with the Glue phone app, it
+burns a key the ESP32 was holding. The ESP32 automatically tries its next key
+(up to 3) on the spot; if all are stale it flags the bank and Home Assistant can
+refill and retry. Optional automations for that are in
+[`HA_AUTOMATIONS.md`](https://github.com/addelovein/GlueHome/blob/main/HA_AUTOMATIONS.md).
+For snappy recovery, set **interval_seconds** to `15`.
+
 **Not magic forever:** it depends on Glue's servers still being online to fetch
 new keys. If Glue's servers die, only the keys already on the ESP32 remain.
 

@@ -54,6 +54,7 @@ class GlueLockHub : public Component, public ble_client::BLEClientNode {
   OfflineKey *next_unconsumed_key_();
   void begin_operation_(uint8_t op);
   bool send_frame_(uint8_t cmd, const uint8_t *payload, size_t len, bool raw = false);
+  bool reserve_and_login_();  // reserve the next key and send LOGIN; false if none/persist fails
   void on_notify_(const uint8_t *data, size_t len);
   void handle_frame_(uint8_t cmd, const uint8_t *challenge, const std::vector<uint8_t> &payload);
   void fail_op_(const char *why);
@@ -73,7 +74,15 @@ class GlueLockHub : public Component, public ble_client::BLEClientNode {
   uint8_t pending_operate_{glue::OP_UNLOCK};
   std::vector<uint8_t> rx_buf_;
   uint32_t op_started_ms_{0};
+  // On KEY_EXPIRED the current key was already burned by another controller; try
+  // the next banked key in the same session, capped so a wholly-stale bank cannot
+  // burn through the whole pool on one press. Capped-out => bank_stale_ for HA.
+  uint8_t login_attempts_{0};
+  bool bank_stale_{false};  // last op exhausted the retry cap on KEY_EXPIRED; HA should refill
 };
+// Try at most this many banked keys per unlock before giving up and asking HA to
+// refill. Small on purpose: see the 5-key pool cap.
+constexpr uint8_t MAX_LOGIN_ATTEMPTS = 3;
 class GlueLock : public lock::Lock, public Parented<GlueLockHub> {
  public:
   void control(const lock::LockCall &call) override {

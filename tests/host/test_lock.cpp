@@ -9,6 +9,8 @@ class Hub:public glue_lock::GlueLockHub{public:
  void reply(uint8_t cmd,uint8_t status=0){uint8_t c[3]={1,2,3};auto f=glue::build_frame(cmd,c,&status,1);on_notify_(f.data(),f.size());}
  void bytes(const std::vector<uint8_t>&f){on_notify_(f.data(),f.size());}
  void wake_ack(){wake_acked_=true;}  // simulate HOST_READY reporting 0x01
+ uint8_t attempts(){return login_attempts_;}
+ bool stale(){return bank_stale_;}
 };
 void reset(){disk.clear();staged.clear();writes.clear();fail_write=fail_sync=false;clock_ms=0;}
 // Production path: wake -> HOST_READY ack advances to LOGIN (no blind delay).
@@ -44,5 +46,29 @@ int main(){
  reset();Hub fb;fb.init("fb");fb.add_offline_key(1,"synthetic");fb.request_lock();
  fb.loop();assert(fb.keys_remaining()==1); // no ack, under fallback window: still WAKE, key not reserved
  clock_ms+=1001;fb.loop();assert(fb.keys_remaining()==0); // fallback elapsed -> LOGIN reserves key
- std::cout<<"PASS: wake failure, wake ack + fallback, reply correlation, durable reservation/reboot, timeout, bank isolation/capacity, persistence failure, CRC/length, fragmentation, controller handoff\n";
+ const uint8_t KEY_EXPIRED=34, LOGIN_ERROR=18;
+ // KEY_EXPIRED on the first key -> retry the next banked key in-session -> success.
+ reset();Hub retry;retry.init("retry");glue_lock::GlueLock rl;retry.set_lock_entity(&rl);
+ retry.add_offline_key(1,"synthetic");retry.add_offline_key(2,"synthetic");login(retry);
+ assert(retry.attempts()==1&&retry.keys_remaining()==1); // reserved key 1, key 2 still available
+ retry.reply(glue::CMD_LOG_IN,KEY_EXPIRED);               // key 1 stale -> auto-retry key 2
+ assert(retry.attempts()==2&&retry.keys_remaining()==0&&!retry.idle()); // now on key 2, not aborted
+ retry.reply(glue::CMD_LOG_IN);retry.reply(glue::CMD_OPERATE);           // key 2 logs in, unlock ok
+ assert(rl.state==lock::LOCK_STATE_LOCKED&&retry.idle()&&!retry.stale());
+ assert(retry.bank_status().find("\"pending\":[1,2]")!=std::string::npos); // both burned, to report
+ // All banked keys stale: retry cap exhausted -> give up, flag stale for HA, never drain >cap.
+ reset();Hub drain;drain.init("drain");glue_lock::GlueLock dl;drain.set_lock_entity(&dl);
+ for(int i=1;i<=5;++i)drain.add_offline_key(i,"synthetic");login(drain);
+ drain.reply(glue::CMD_LOG_IN,KEY_EXPIRED);drain.reply(glue::CMD_LOG_IN,KEY_EXPIRED); // attempts 1,2 -> 3
+ assert(drain.attempts()==3&&!drain.idle());
+ drain.reply(glue::CMD_LOG_IN,KEY_EXPIRED);                  // 3rd rejection hits the cap
+ assert(drain.idle()&&drain.stale()&&dl.state!=lock::LOCK_STATE_LOCKED);
+ assert(drain.keys_remaining()==2); // exactly 3 reserved (cap), 2 untouched — pool not drained
+ assert(drain.bank_status().find("\"stale\":true")!=std::string::npos);
+ // A non-KEY_EXPIRED rejection must NOT retry — it isn't a stale-key problem.
+ reset();Hub other;other.init("other");glue_lock::GlueLock ol;other.set_lock_entity(&ol);
+ other.add_offline_key(1,"synthetic");other.add_offline_key(2,"synthetic");login(other);
+ other.reply(glue::CMD_LOG_IN,LOGIN_ERROR);
+ assert(other.idle()&&!other.stale()&&other.attempts()==1&&other.keys_remaining()==1); // only 1 key spent
+ std::cout<<"PASS: wake failure, wake ack + fallback, KEY_EXPIRED retry + cap + stale signal, non-expired no-retry, reply correlation, durable reservation/reboot, timeout, bank isolation/capacity, persistence failure, CRC/length, fragmentation, controller handoff\n";
 }
