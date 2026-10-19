@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.glue_token.json
+# never commit per-user secrets or extracted account data
+extracted/
+esphome/glue-*.yaml
+!esphome/glue-lock.example.yaml
+secrets.json
+secrets.enc
+*.eml
+*.xapk
+xapk/
+decoded/
+decompiled/
+.serena/
+.claude/
+.esphome/
+.venv*/
+.DS_Store

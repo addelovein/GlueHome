@@ -1,0 +1,89 @@
+# Example ESPHome config for the Glue lock.
+# Fill in the lock's BLE MAC (find it with `tools/glue ble scan` at the lock).
+# Keys are pushed from Home Assistant via the add_offline_key service (below).
+
+esphome:
+  name: glue-entrance
+  min_version: 2026.9.1
+  # Register the HA -> device key-push service so HA can refill the bank.
+  on_boot:
+    priority: -100
+    then: []
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  services:
+    # HA calls this per key: esphome.glue_entrance_add_key, data: {index: 416, key: "base64..."}
+    - service: add_key
+      variables:
+        index: int
+        key: string
+      then:
+        - lambda: 'if (index >= 0) id(glue_hub).add_offline_key((uint32_t) index, key);'
+    - service: ack_burn
+      variables:
+        index: int
+      then:
+        - lambda: 'if (index >= 0) id(glue_hub).acknowledge_burn((uint32_t) index);'
+    - service: retire_keys
+      then:
+        - lambda: 'id(glue_hub).retire_keys();'
+    - service: resume_keys
+      then:
+        - lambda: 'id(glue_hub).resume_keys();'
+
+ota:
+  - platform: esphome
+
+# --- Glue lock ---------------------------------------------------------------
+esp32_ble_tracker:          # ble_client requires this
+
+ble_client:
+  - mac_address: AA:BB:CC:DD:EE:FF    # <-- the lock's BLE MAC (from `glue ble scan`)
+    id: glue_ble
+    auto_connect: true
+
+glue_lock:
+  - id: glue_hub
+    ble_client_id: glue_ble
+    lock_id: "00000000-0000-0000-0000-000000000001"  # replace with your Glue lock UUID
+
+lock:
+  - platform: glue_lock
+    glue_lock_id: glue_hub
+    name: "Entrance"
+
+sensor:
+  - platform: template
+    name: "Glue keys remaining"
+    lambda: 'return id(glue_hub).keys_remaining();'
+    update_interval: 5s
+
+text_sensor:
+  - platform: template
+    name: "Glue bank status"
+    lambda: 'return id(glue_hub).bank_status();'
+    update_interval: 5s
+
+# Optional: door reed + config-selectable close behavior (plan §11) — add later.
+# binary_sensor:
+#   - platform: gpio
+#     pin: GPIO4
+#     name: "Entrance door"
+#     device_class: door
