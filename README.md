@@ -1,14 +1,58 @@
-# glue-local
+# Glue lock — local control for Home Assistant
 
-Local BLE and ESPHome/Home Assistant control for a Glue smart lock you own or
-have explicit permission to operate. Not affiliated with Glue.
+Control your **Glue smart lock** from Home Assistant after the vendor stopped
+maintaining it. A small ESP32 by your door unlocks over Bluetooth; Home Assistant
+keeps it supplied with keys. For locks you own or are authorised to operate.
+Not affiliated with Glue.
 
-Targets **current stable ESPHome, minimum 2026.9.1**, and Python **3.10+**.
-The implementation has offline regression coverage; physical BLE operation,
-cloud burn/refill, HA integration and a complete target firmware build still
-need validation. Do not interpret passing host tests as a verified door lock.
+> **Status:** the protocol is proven on real lock hardware; the ESP32 firmware and
+> HA add-on are built and validated but **not yet run on a physical ESP32**.
+> Expect to debug the first flash.
 
-## Direct BLE setup
+---
+
+## Install in Home Assistant (the easy way)
+
+**1. Set up the lock** — on any computer with Python 3.10+, once, to discover your
+lock and generate its ESPHome config:
+
+```sh
+python3 -m pip install -r requirements.txt
+python3 tools/glue.py setup
+```
+
+This signs into your Glue account, finds your lock, and writes
+`esphome/glue-<serial>.yaml` with your lock id filled in. Note the lock id/serial
+it prints — you'll paste them into the add-on.
+
+**2. Flash the ESP32** — install [ESPHome](https://esphome.io) (easiest as the HA
+add-on), flash the generated config to an ESP32 board, and add the node to Home
+Assistant. Full step-by-step, including how to get the lock's Bluetooth MAC:
+**[ESPHOME_SETUP.md](ESPHOME_SETUP.md)**.
+
+**3. Install the key-refill add-on (one click)** — this keeps the lock supplied
+with keys so it keeps working:
+
+1. Home Assistant → **Settings → Add-ons → Add-on Store**.
+2. Top-right **⋮ → Repositories**, paste and **Add**:
+   ```
+   https://github.com/addelovein/GlueHome
+   ```
+3. Find **Glue key-refill** in the store → **Install** → **Configuration** tab →
+   fill in the boxes → **Save** → **Start** (turn on *Start on boot* + *Watchdog*).
+
+Full add-on instructions: **[glue-refill/README.md](glue-refill/README.md)**.
+
+Your lock now appears as a `lock` entity in Home Assistant.
+
+---
+
+## Advanced / developers
+
+Everything below is for using the lock directly from a computer, or working on
+the project. **If you just want the lock in Home Assistant, you're done above.**
+
+### Direct BLE setup
 
 ```sh
 python3 -m pip install -r requirements.txt
@@ -31,7 +75,7 @@ LOGIN. An uncertain result does **not** return it to the available pool. The CLI
 attempts burn reporting/refill after each session; `auth refill` retries after
 an outage or process crash. A failed operation exits unsuccessfully.
 
-## Credentials and key storage
+### Credentials and key storage
 
 Environment values override stored values: `GLUE_USERNAME`, `GLUE_PASSWORD`,
 `GLUE_LOCK_ID`, `GLUE_LOCK_SERIAL`, and optional Cognito overrides. On desktop,
@@ -64,7 +108,10 @@ python3 tools/glue.py where
 `auth token` and `auth keys` are explicit secret-export commands: their output
 contains credentials/key material. Routine setup/refill/sync does not print it.
 
-## Home Assistant refill worker
+### Home Assistant refill worker (manual — the add-on does this for you)
+
+> Most people should use the **one-click add-on** above instead of this. This
+> section documents running the same worker by hand, e.g. on a non-HA host.
 
 The generated ESPHome configuration exposes `add_key`, `ack_burn` and a
 **Glue bank status** sensor. The sensor contains only lock identity, pending
@@ -118,7 +165,7 @@ keys, but never move the motor. Do not manually clear the ownership record.
 Glue's server caps the pool at five keys. Backend outages permit only the
 remaining local operations. This does not solve permanent cloud independence.
 
-## Validation
+### Validation
 
 ```sh
 python3 tools/glue.py test
