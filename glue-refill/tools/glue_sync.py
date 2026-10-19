@@ -8,6 +8,7 @@ import argparse
 import json
 import re
 import time
+import urllib.error
 import urllib.request
 from urllib.parse import quote, urlsplit
 
@@ -33,11 +34,18 @@ def ha_request(path, data=None):
     _http_ok = ('localhost', '127.0.0.1', '::1', 'homeassistant', 'supervisor', 'hassio')
     if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in _http_ok):
         raise ValueError('Use HTTPS for remote HA, or HTTP on an internal host')
-    req = urllib.request.Request(base + '/api/' + path,
+    url = base + '/api/' + path
+    req = urllib.request.Request(url,
         data=None if data is None else json.dumps(data).encode(),
         headers={'Authorization': 'Bearer ' + _required('ha-token'), 'Content-Type': 'application/json'})
-    with urllib.request.build_opener(glue_auth._NoRedirect).open(req, timeout=15) as response:
-        return json.load(response)
+    try:
+        with urllib.request.build_opener(glue_auth._NoRedirect).open(req, timeout=15) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        # Make misconfiguration diagnosable: a 404 is usually a wrong entity id,
+        # a 401 a bad/expired token. Print the request so the cause is obvious.
+        print(f'HA API {exc.code} for {url} (check ha_token and ha_bank_entity)', flush=True)
+        raise
 
 
 def sync_once(controller=None):
