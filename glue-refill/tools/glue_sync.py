@@ -6,6 +6,7 @@ GLUE_HA_BANK_ENTITY (sensor entity ID). This worker never operates the motor.
 """
 import argparse
 import json
+import os
 import re
 import time
 import urllib.error
@@ -25,19 +26,36 @@ def _required(name):
     return value
 
 
-def ha_request(path, data=None):
-    base = _required('ha-url').rstrip('/')
+def _ha_endpoint():
+    """Return (base_api_url, bearer_token). Inside an HA add-on, default to the
+    Supervisor's Core API proxy (http://supervisor/core/api) with SUPERVISOR_TOKEN
+    — no manual URL/token needed and it always routes correctly. An explicit
+    GLUE_HA_URL (+ GLUE_HA_TOKEN) overrides this for non-add-on use."""
+    url = glue_store.get('ha-url')
+    token = glue_store.get('ha-token')
+    supervisor = os.environ.get('SUPERVISOR_TOKEN')
+    if not url and supervisor:
+        return 'http://supervisor/core/api', supervisor
+    if not url:
+        raise RuntimeError('Set GLUE_HA_URL + GLUE_HA_TOKEN, or run inside an HA add-on (SUPERVISOR_TOKEN)')
+    base = url.rstrip('/')
     parsed = urlsplit(base)
-    # Permit plain HTTP only on loopback or the HA Supervisor's internal hostnames
-    # (homeassistant/supervisor/hassio) — container-private networking that never
-    # leaves the host. Anything else must use HTTPS.
+    # Permit plain HTTP only on loopback or HA's internal hostnames — container-
+    # private networking that never leaves the host. Anything else must use HTTPS.
     _http_ok = ('localhost', '127.0.0.1', '::1', 'homeassistant', 'supervisor', 'hassio')
     if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in _http_ok):
         raise ValueError('Use HTTPS for remote HA, or HTTP on an internal host')
-    url = base + '/api/' + path
+    if not token:
+        raise RuntimeError('GLUE_HA_TOKEN is required with GLUE_HA_URL')
+    return base + '/api', token
+
+
+def ha_request(path, data=None):
+    api_base, token = _ha_endpoint()
+    url = api_base + '/' + path
     req = urllib.request.Request(url,
         data=None if data is None else json.dumps(data).encode(),
-        headers={'Authorization': 'Bearer ' + _required('ha-token'), 'Content-Type': 'application/json'})
+        headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
     try:
         with urllib.request.build_opener(glue_auth._NoRedirect).open(req, timeout=15) as response:
             return json.load(response)
