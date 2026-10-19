@@ -11,6 +11,10 @@ static const char *const TAG = "glue_lock";
 // Verified on-device (GL04A fw 0.32): LOCK_PROTOCOL is write + INDICATE (not notify),
 // WAKE_UP is write-with-response, and the wake ack (0x01) arrives on HOST_READY (notify).
 // All writes must be WRITE_TYPE_RSP; write-without-response is silently dropped.
+// The three characteristics live under this service (confirmed on-device). The
+// service UUID is NOT the LOCK_PROTOCOL characteristic UUID — a GATT lookup must
+// use UUID_SERVICE, or ESP-IDF's get_characteristic(service, char) finds nothing.
+static const char *UUID_SERVICE = "fec3892f-e506-4956-89c8-9bb5934e3121";
 static const char *UUID_LOCK_PROTOCOL = "e4b264d7-4e56-424f-8b5c-d4089ea216ef";
 static const char *UUID_WAKE_UP = "94a8dfd9-49f7-4365-95d2-d2b94624b72c";
 static const char *UUID_HOST_READY = "8e939cff-3d83-4f61-8eb9-b5f25d39c15c";
@@ -206,11 +210,10 @@ void GlueLockHub::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
     case ESP_GATTC_SEARCH_CMPL_EVT: {
       handles_ready_ = false;
       notify_registered_ = false;
-      // The three characteristics share one service; the characteristic UUID doubles as
-      // the service UUID here. LOCK_PROTOCOL carries command/response (indicate),
-      // HOST_READY carries the wake ack (notify), WAKE_UP is write-only.
-      const auto svc = esp32_ble::ESPBTUUID::from_raw(UUID_LOCK_PROTOCOL);
-      auto *lc = parent()->get_characteristic(svc, svc);
+      // All three characteristics live under UUID_SERVICE. LOCK_PROTOCOL carries
+      // command/response (indicate), HOST_READY the wake ack (notify), WAKE_UP is write-only.
+      const auto svc = esp32_ble::ESPBTUUID::from_raw(UUID_SERVICE);
+      auto *lc = parent()->get_characteristic(svc, esp32_ble::ESPBTUUID::from_raw(UUID_LOCK_PROTOCOL));
       auto *wc = parent()->get_characteristic(svc, esp32_ble::ESPBTUUID::from_raw(UUID_WAKE_UP));
       auto *rc = parent()->get_characteristic(svc, esp32_ble::ESPBTUUID::from_raw(UUID_HOST_READY));
       if (!lc || !wc || !rc) { ESP_LOGE(TAG, "Missing Glue characteristics"); break; }
