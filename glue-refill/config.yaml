@@ -3,13 +3,16 @@
 # credentials and refills the ESP32's single-use key bank over HA's API. The
 # ESP32 itself never holds credentials and never touches the cloud.
 name: Glue key-refill worker
-version: "0.1.0"
+version: "0.1.1"
 slug: glue_refill
 description: Refills the ESPHome Glue lock's single-use key pool via Home Assistant.
 arch:
   - aarch64
   - amd64
   - armv7
+# run.sh is a plain bash script (not an s6 service), so run it as the container
+# command directly instead of under s6-overlay (which must be PID 1).
+init: false
 # Needs network (Cognito + HA API). No GPIO/USB/BLE: refill is network-only.
 hassio_api: false
 homeassistant_api: false
