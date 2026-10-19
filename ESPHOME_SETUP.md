@@ -113,36 +113,34 @@ that's the `api_encryption_key` from Step 3. Once added you'll see:
 
 The lock will show state but can't operate yet — it has no keys. That's Step 6.
 
-## Step 6 — Push keys to the ESP32, keep them refilled  (the refill worker)
+## Step 6 — Keep keys topped up: install the refill add-on (one click)
 
-The firmware holds no credentials by design; HA (via this repo's worker) pushes
-keys and reports each burn. Set these for the worker — environment or the secret
-store (`python3 tools/glue_store.py set <name>` prompts without echo):
+The firmware holds no credentials by design; Home Assistant refills the keys.
+The easy way is the **Glue key-refill add-on** — install it from this repository
+and fill in a form. No terminal. Full steps are in `glue-refill/README.md`; in
+short:
 
-| Variable | Value |
-| --- | --- |
-| `GLUE_HA_URL` | Your HA base URL (HTTPS; HTTP only on loopback) |
-| `GLUE_HA_TOKEN` | An HA long-lived access token (Profile → Security) |
-| `GLUE_HA_DEVICE` | The ESPHome node name, e.g. `glue-<serial>` |
-| `GLUE_HA_BANK_ENTITY` | The bank sensor entity, e.g. `sensor.glue_bank_status` |
+1. **Settings → Add-ons → Add-on Store → ⋮ → Repositories**, add this repo's URL.
+2. Install **Glue key-refill**, open **Configuration**, fill the boxes (your Glue
+   login, lock id/serial from Step 2, an HA token, and a one-time storage key),
+   **Save**, then **Start** with *Start on boot* + *Watchdog* on.
 
-(`GLUE_LOCK_ID`, `GLUE_LOCK_SERIAL`, `GLUE_USERNAME`, `GLUE_PASSWORD` are already
-stored by `setup`. On a headless worker with no OS vault, also set
-`GLUE_STORAGE_KEY`.)
+It reports used keys to Glue and sends fresh ones to the ESP32 so the bank
+self-heals toward 5. The first successful run records **ESPHome as the owner** of
+the key bank and disables direct CLI unlocks — deliberate, so your computer and
+the ESP32 never reuse the same one-time key.
 
-Then run the worker on a host that can reach HA:
+<details><summary>Advanced: run the worker manually instead of the add-on</summary>
+
+Set `GLUE_HA_URL`, `GLUE_HA_TOKEN`, `GLUE_HA_DEVICE`, `GLUE_HA_BANK_ENTITY`
+(plus `GLUE_LOCK_ID/SERIAL/USERNAME/PASSWORD`, already stored by `setup`, and
+`GLUE_STORAGE_KEY` on a headless host), then:
 
 ```sh
 python3 tools/glue.py sync          # one reconciliation (never moves the motor)
 python3 tools/glue.py sync --watch  # reconcile / retry every 15s
 ```
-
-Run `--watch` under a supervisor (systemd, Docker restart policy, HA
-`shell_command`) so it stays up. It reads the node's pending burns, reports them
-to Glue, acknowledges them to the node, and delivers replacement keys so the bank
-self-heals toward 5. The first successful handoff records **ESPHome as the owner**
-of that lock's key bank and disables direct CLI unlocks — this is deliberate, so
-Python and the ESP32 never reuse the same single-use key.
+</details>
 
 Now unlocking from HA (or an HA automation) drives the lock.
 
