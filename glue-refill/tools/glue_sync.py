@@ -27,9 +27,12 @@ def _required(name):
 def ha_request(path, data=None):
     base = _required('ha-url').rstrip('/')
     parsed = urlsplit(base)
-    # Permit plain HTTP only on loopback (HA local shell_command/container host).
-    if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in ('localhost', '127.0.0.1', '::1')):
-        raise ValueError('Use HTTPS for remote HA, or HTTP on loopback')
+    # Permit plain HTTP only on loopback or the HA Supervisor's internal hostnames
+    # (homeassistant/supervisor/hassio) — container-private networking that never
+    # leaves the host. Anything else must use HTTPS.
+    _http_ok = ('localhost', '127.0.0.1', '::1', 'homeassistant', 'supervisor', 'hassio')
+    if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in _http_ok):
+        raise ValueError('Use HTTPS for remote HA, or HTTP on an internal host')
     req = urllib.request.Request(base + '/api/' + path,
         data=None if data is None else json.dumps(data).encode(),
         headers={'Authorization': 'Bearer ' + _required('ha-token'), 'Content-Type': 'application/json'})
