@@ -3,7 +3,7 @@
 # credentials and refills the ESP32's single-use key bank over HA's API. The
 # ESP32 itself never holds credentials and never touches the cloud.
 name: Glue key-refill worker
-version: "0.1.1"
+version: "0.1.2"
 slug: glue_refill
 description: Refills the ESPHome Glue lock's single-use key pool via Home Assistant.
 arch:
