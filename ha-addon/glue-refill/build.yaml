@@ -1,0 +1,6 @@
+# Base images per architecture. The Supervisor substitutes the matching one into
+# the Dockerfile's ARG BUILD_FROM when it builds this local add-on.
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.19
+  amd64: ghcr.io/home-assistant/amd64-base:3.19
+  armv7: ghcr.io/home-assistant/armv7-base:3.19
