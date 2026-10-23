@@ -18,7 +18,9 @@ static const char *UUID_SERVICE = "fec3892f-e506-4956-89c8-9bb5934e3121";
 static const char *UUID_LOCK_PROTOCOL = "e4b264d7-4e56-424f-8b5c-d4089ea216ef";
 static const char *UUID_WAKE_UP = "94a8dfd9-49f7-4365-95d2-d2b94624b72c";
 static const char *UUID_HOST_READY = "8e939cff-3d83-4f61-8eb9-b5f25d39c15c";
-constexpr uint32_t OP_TIMEOUT_MS = 15000;
+// Covers on-demand connect: the lock advertises every few seconds, connect +
+// service discovery ~3s, then wake/login/operate.
+constexpr uint32_t OP_TIMEOUT_MS = 25000;
 // Fallback only: normally the wake step completes as soon as HOST_READY reports 0x01.
 constexpr uint32_t WAKE_DELAY_MS = 1000;
 
@@ -53,8 +55,15 @@ bool GlueLockHub::save_bank_() {
   return true;
 }
 void GlueLockHub::loop() {
-  if (op_state_ == Op::IDLE) return;
+  if (op_state_ == Op::IDLE) {
+    // Stay disconnected while idle: saves the lock's battery and frees it for the
+    // phone app. set_enabled(false) is idempotent (no-op if already disabled) and
+    // tears down any stray reconnect the tracker made after a prior operation.
+    if (parent()->enabled) parent()->set_enabled(false);
+    return;
+  }
   if (millis() - op_started_ms_ > OP_TIMEOUT_MS) { fail_op_("operation timeout"); return; }
+  // While CONNECTING, wait for the link to come up (handled in the GATT events).
   if (op_state_ != Op::WAKE) return;
   // Proceed as soon as HOST_READY acks the wake (0x01); fall back to a timed wait so a
   // firmware that acks differently still advances rather than stalling to OP_TIMEOUT_MS.
@@ -177,20 +186,34 @@ void GlueLockHub::request_unlock() { begin_operation_(glue::OP_UNLOCK); }
 void GlueLockHub::request_lock() { begin_operation_(glue::OP_LOCK); }
 void GlueLockHub::begin_operation_(uint8_t op) {
   if (op_state_ != Op::IDLE) return;
-  if (node_state != esp32_ble_tracker::ClientState::ESTABLISHED || !handles_ready_ || !next_unconsumed_key_()) {
+  // A key must be available to even start; connection is brought up on demand.
+  if (!next_unconsumed_key_()) {
     if (lock_) lock_->publish_state(lock::LOCK_STATE_NONE);
-    ESP_LOGW(TAG, "Cannot operate: connection or key bank unavailable");
+    ESP_LOGW(TAG, "Cannot operate: key bank unavailable");
     return;
   }
   pending_operate_ = op;
-  for (auto &b : challenge_) b = static_cast<uint8_t>(random_uint32());
   rx_buf_.clear();
-  wake_acked_ = false;
   login_attempts_ = 0;
   bank_stale_ = false;
   op_started_ms_ = millis();
-  op_state_ = Op::WAKE;
   if (lock_) lock_->publish_state(op == glue::OP_LOCK ? lock::LOCK_STATE_LOCKING : lock::LOCK_STATE_UNLOCKING);
+  if (node_state == esp32_ble_tracker::ClientState::ESTABLISHED && handles_ready_) {
+    start_wake_();  // already connected (e.g. back-to-back ops): go straight to wake
+  } else {
+    // Connect on demand: enable the client; the scanner (auto_connect) learns the
+    // lock's random address type and the tracker promotes it to a connection. The
+    // WRITE_DESCR_EVT handler calls start_wake_() once handles are ready.
+    op_state_ = Op::CONNECTING;
+    parent()->set_enabled(true);
+  }
+}
+void GlueLockHub::start_wake_() {
+  for (auto &b : challenge_) b = static_cast<uint8_t>(random_uint32());
+  wake_acked_ = false;
+  rx_buf_.clear();
+  op_started_ms_ = millis();  // restart the clock for the wake/login/operate phase
+  op_state_ = Op::WAKE;
   uint8_t wake = glue::CMD_WAKE_UP;
   send_frame_(0, &wake, 1, true);  // no fallthrough after a failed write
 }
@@ -240,6 +263,8 @@ void GlueLockHub::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
       if (param->write.handle == cccd_handle_ && notify_registered_ && param->write.status == ESP_GATT_OK) {
         handles_ready_ = true;
         node_state = esp32_ble_tracker::ClientState::ESTABLISHED;
+        // On-demand connect: the link is now ready, so begin the wake step.
+        if (op_state_ == Op::CONNECTING) start_wake_();
       }
       break;
     case ESP_GATTC_WRITE_CHAR_EVT:
@@ -262,7 +287,10 @@ void GlueLockHub::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
       handles_ready_ = false;
       notify_registered_ = false;
       rx_buf_.clear();
-      if (op_state_ != Op::IDLE) fail_op_("disconnected mid-operation");
+      // A drop while still CONNECTING is expected (the lock advertises intermittently
+      // and may close a half-open link); auto_connect retries on the next advert and
+      // the overall timeout bounds it. Only fail a drop once we're past connect.
+      if (op_state_ != Op::IDLE && op_state_ != Op::CONNECTING) fail_op_("disconnected mid-operation");
       break;
     default: break;
   }
@@ -324,7 +352,10 @@ void GlueLockHub::finish_op_(bool locked) {
   op_state_ = Op::IDLE;
   rx_buf_.clear();
   handles_ready_ = false;
-  parent()->disconnect();  // one operation per connection; discard delayed replies
+  // Disable the client: disconnects now and keeps it disconnected while idle
+  // (saves the lock's battery, frees it for the phone app). Do NOT also call
+  // disconnect() — set_enabled(false) already does, and a second call warns.
+  parent()->set_enabled(false);
 }
 void GlueLockHub::fail_op_(const char *why) {
   ESP_LOGW(TAG, "Operation failed: %s", why);
@@ -332,7 +363,7 @@ void GlueLockHub::fail_op_(const char *why) {
   op_state_ = Op::IDLE;
   rx_buf_.clear();
   handles_ready_ = false;
-  parent()->disconnect();
+  parent()->set_enabled(false);
 }
 }  // namespace glue_lock
 }  // namespace esphome

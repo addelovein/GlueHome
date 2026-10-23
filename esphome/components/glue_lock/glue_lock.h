@@ -55,6 +55,7 @@ class GlueLockHub : public Component, public ble_client::BLEClientNode {
   void begin_operation_(uint8_t op);
   bool send_frame_(uint8_t cmd, const uint8_t *payload, size_t len, bool raw = false);
   bool reserve_and_login_();  // reserve the next key and send LOGIN; false if none/persist fails
+  void start_wake_();  // begin the wake step once the BLE link is established + ready
   void on_notify_(const uint8_t *data, size_t len);
   void handle_frame_(uint8_t cmd, const uint8_t *challenge, const std::vector<uint8_t> &payload);
   void fail_op_(const char *why);
@@ -69,7 +70,10 @@ class GlueLockHub : public Component, public ble_client::BLEClientNode {
   bool handles_ready_{false};
   bool notify_registered_{false};
   bool wake_acked_{false};  // set when HOST_READY reports 0x01 after a wake write
-  enum class Op { IDLE, WAKE, LOGIN, OPERATE } op_state_{Op::IDLE};
+  // CONNECTING: an operation is requested but the BLE link is being brought up
+  // on demand (the client is kept disabled while idle to save the lock's battery
+  // and free it for the phone app). WAKE begins once handles are ready.
+  enum class Op { IDLE, CONNECTING, WAKE, LOGIN, OPERATE } op_state_{Op::IDLE};
   uint8_t challenge_[3]{};
   uint8_t pending_operate_{glue::OP_UNLOCK};
   std::vector<uint8_t> rx_buf_;
