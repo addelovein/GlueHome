@@ -11,6 +11,18 @@ class Hub:public glue_lock::GlueLockHub{public:
  void wake_ack(){wake_acked_=true;}  // simulate HOST_READY reporting 0x01
  uint8_t attempts(){return login_attempts_;}
  bool stale(){return bank_stale_;}
+ // on-demand connect helpers
+ void disconnected(){handles_ready_=false;node_state=esp32_ble_tracker::ClientState::IDLE;parent()->enabled=false;}
+ bool connecting(){return op_state_==Op::CONNECTING;}
+ bool enabled(){return parent()->enabled;}
+ void connect_complete(){ // drive the real discovery path so cccd_handle_ is set, then the CCCD write
+   esp_ble_gattc_cb_param_t s{};
+   gattc_event_handler(ESP_GATTC_SEARCH_CMPL_EVT,0,&s);    // sets lock/wake/ready/cccd handles (stub -> cccd=2)
+   esp_ble_gattc_cb_param_t r{}; r.reg_for_notify.handle=lock_char_handle_; r.reg_for_notify.status=ESP_GATT_OK;
+   gattc_event_handler(ESP_GATTC_REG_FOR_NOTIFY_EVT,0,&r); // notify_registered_ = true
+   esp_ble_gattc_cb_param_t p{}; p.write.handle=cccd_handle_; p.write.status=ESP_GATT_OK;
+   gattc_event_handler(ESP_GATTC_WRITE_DESCR_EVT,0,&p);    // handles_ready_, ESTABLISHED, start_wake_()
+ }
 };
 void reset(){disk.clear();staged.clear();writes.clear();fail_write=fail_sync=false;clock_ms=0;}
 // Production path: wake -> HOST_READY ack advances to LOGIN (no blind delay).
@@ -24,7 +36,7 @@ int main(){
  Hub reboot;reboot.init("one");assert(reboot.keys_remaining()==0);assert(!reboot.add_offline_key(1,"synthetic"));
  assert(reboot.acknowledge_burn(1));assert(reboot.bank_status().find("\"pending\":[]")!=std::string::npos);
  Hub second;second.init("two");assert(second.keys_remaining()==0);assert(second.add_offline_key(1,"synthetic"));
- assert(reboot.add_offline_key(2,"synthetic"));login(reboot);reboot.reply(glue::CMD_LOG_IN);clock_ms+=16000;reboot.loop();assert(reboot.idle());
+ assert(reboot.add_offline_key(2,"synthetic"));login(reboot);reboot.reply(glue::CMD_LOG_IN);clock_ms+=26000;reboot.loop();assert(reboot.idle()); // > OP_TIMEOUT_MS (25s)
  Hub timeout_reboot;timeout_reboot.init("one");assert(timeout_reboot.keys_remaining()==0);
  reset();Hub full;full.init("full");for(int i=1;i<=8;++i)assert(full.add_offline_key(i,"synthetic"));
  assert(!full.add_offline_key(9,"synthetic"));full.request_lock();assert(!full.add_offline_key(9,"synthetic"));assert(full.keys_remaining()==8);
@@ -70,5 +82,21 @@ int main(){
  other.add_offline_key(1,"synthetic");other.add_offline_key(2,"synthetic");login(other);
  other.reply(glue::CMD_LOG_IN,LOGIN_ERROR);
  assert(other.idle()&&!other.stale()&&other.attempts()==1&&other.keys_remaining()==1); // only 1 key spent
- std::cout<<"PASS: wake failure, wake ack + fallback, KEY_EXPIRED retry + cap + stale signal, non-expired no-retry, reply correlation, durable reservation/reboot, timeout, bank isolation/capacity, persistence failure, CRC/length, fragmentation, controller handoff\n";
+ // On-demand connect: request while disconnected -> CONNECTING, enabled, NO key spent yet.
+ reset();Hub od;od.init("od");glue_lock::GlueLock odl;od.set_lock_entity(&odl);od.add_offline_key(1,"synthetic");
+ od.disconnected();assert(!od.enabled());
+ od.request_lock();
+ assert(od.connecting()&&od.enabled()&&od.keys_remaining()==1); // enabled client, no reservation during connect
+ od.connect_complete();od.wake_ack();od.loop();   // link ready -> wake -> login reserves the key
+ assert(od.keys_remaining()==0);                   // key reserved only after the link is up
+ od.reply(glue::CMD_LOG_IN);od.reply(glue::CMD_OPERATE);
+ assert(odl.state==lock::LOCK_STATE_LOCKED&&od.idle()&&!od.enabled()); // finished -> client disabled (idle=disconnected)
+ // Connect timeout: never comes up -> fail after OP_TIMEOUT_MS, NO key spent, client disabled.
+ reset();Hub ct;ct.init("ct");glue_lock::GlueLock ctl;ct.set_lock_entity(&ctl);ct.add_offline_key(1,"synthetic");
+ ct.disconnected();ct.request_lock();assert(ct.connecting()&&ct.keys_remaining()==1);
+ clock_ms+=26000;ct.loop();
+ assert(ct.idle()&&ct.keys_remaining()==1&&!ct.enabled()); // timed out mid-connect: key NOT burned, disconnected
+ // Idle loop keeps the client disabled (battery saver) even if nothing is happening.
+ reset();Hub idle;idle.init("idle");idle.disconnected();assert(!idle.enabled());idle.loop();assert(!idle.enabled());
+ std::cout<<"PASS: wake failure, wake ack + fallback, KEY_EXPIRED retry + cap + stale signal, non-expired no-retry, on-demand connect + connect-timeout keeps key + idle-disable, reply correlation, durable reservation/reboot, timeout, bank isolation/capacity, persistence failure, CRC/length, fragmentation, controller handoff\n";
 }
