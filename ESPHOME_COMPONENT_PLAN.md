@@ -117,9 +117,9 @@ An **external component** (`esphome::Component` + `esp32_ble_client`). Plain YAM
 - **CRC-16/CCITT** (poly 0x1021, init 0x0000, little-endian append) — from `O.java`.
 - **Frame builder:** `[cmd:1][len:2 LE][challenge:3][payload:N][crc:2 LE]`, `len = payload+8` — from `BLEProtocol$Packet` / `FrameBuilder`.
 - **Challenge handling:** seed 3 random bytes; on each reply copy the lock's returned challenge into the next frame (`B5/a.java` semantics).
-- **20-byte chunked GATT writes**; reassemble notifications.
+- **20-byte chunked GATT writes** (write-with-response); reassemble **indications** on LOCK_PROTOCOL (HOST_READY uses notify for the 0x01 wake ack).
 - **Sequence:** `WAKE_UP(0x01 raw)` → `LOG_IN(0x19, key)` → `OPERATE(0x32, 0x00 unlock / 0x01 lock)`; parse response status byte → `SUCCESS` / `LockIsLocked(28)` / `LockIsUnlocked(29)` / `MotorNotReady(30)` / `Overcurrent(27)` / `KEY_EXPIRED(34)` / `INCORRECT_CHALLENGE(21)`.
-- GATT: lock service `E4B264D7-4E56-424F-8B5C-D4089EA216EF`, `LOCK_PROTOCOL` char (same UUID), `WAKE_UP` char `94A8DFD9-49F7-4365-95D2-D2B94624B72C`.
+- GATT (on-device): lock service `fec3892f-e506-4956-89c8-9bb5934e3121` holds `LOCK_PROTOCOL` (`E4B264D7-…`, write+indicate), `WAKE_UP` (`94A8DFD9-…`, write-with-response) and `HOST_READY` (`8E939CFF-…`, notify, carries the 0x01 wake ack). The service UUID is **not** the LOCK_PROTOCOL characteristic UUID.
 
 ### 4b. Key bank on the ESP32
 - Stored in ESP32 **NVS/flash** (`esphome::ESPPreferences`) so it survives reboots: a small ring of `{keyIndex, keyBytes[112], consumed:bool}`.
@@ -141,7 +141,7 @@ Precedence (writeup §11): **bolt sensor > OPERATE-response confirmation > door-
 IDLE → (command/auto-trigger) → CONNECTING → WAKE → LOGIN → OPERATE
      → on SUCCESS: set state from the operation; on LockIsLocked/Unlocked: adopt reported state
      → on MotorNotReady/Overcurrent: FAIL (surface to HA, keep prior state)
-     → on KEY_EXPIRED/INCORRECT_CHALLENGE: mark key bad, retry next key once, else FAIL
+     → on KEY_EXPIRED: mark key burned, retry the next banked key in-session up to 3 times; if all stale, flag the bank stale for HA to refill+retry. Other rejections FAIL (no retry).
      → DISCONNECT
 If bolt sensor present: its GPIO edge updates state independently at any time (truth).
 ```

@@ -39,7 +39,7 @@ The original audit evidence below is historical; line references describe the pr
 
 Scope: all first-party Python tools, bash dispatcher, ESPHome component and example configuration, dependency declaration, README and design claims; selected decompiled Android protocol/API code used as reference. Extracted account data was inspected for schema and permissions without printing secret values. This is not a full audit of the bundled Android application's third-party dependencies or a penetration test of Glue's backend.
 
-No lock commands, cloud authentication, key burns, firmware uploads, or production changes were performed. Application source files were not modified. This directory has no `.git`, so commit history, tracked-secret status and a clean-worktree baseline could not be verified. Serena activation created project metadata; validation outputs and synthetic harnesses were placed in temporary directories.
+No lock commands, cloud authentication, key burns, firmware uploads, or production changes were performed. Application source files were not modified. At the time of this audit the directory had no `.git`; it is now a git repository pushed public at github.com/addelovein/GlueHome, so commit history and worktree state are since tracked. Serena activation created project metadata; validation outputs and synthetic harnesses were placed in temporary directories.
 
 ## Findings
 
