@@ -23,15 +23,14 @@ Open the add-on's **Configuration** tab and fill in the boxes:
 
 | Box | What to type |
 | --- | --- |
-| Glue username | Your Glue app login (email or phone) |
+| Glue username | The **canonical username** `glue.py setup` printed (an account UUID or phone) — **not your email** |
 | Glue password | Your Glue app password |
 | Lock id | From the one-time `glue.py setup` run (a long UUID) |
 | Lock serial | Your lock's serial, e.g. `GL04A.DL...` |
-| HA token | A Home Assistant token — Profile → Security → **Create Token** |
-| HA url | Leave as `http://homeassistant:8123` unless you know otherwise |
-| ESP device | Your ESPHome node name, e.g. `glue-entrance` |
-| Bank sensor | Leave as `sensor.glue_bank_status` unless you renamed it |
-| Storage key | Press the dice/any random text, OR run `openssl rand -base64 32` once and paste it. **Don't change it later.** |
+| ESP device | Your ESPHome node name, e.g. `gluelock-esp32` |
+| Bank sensor | The bank status entity, e.g. `sensor.<node>_glue_bank_status` |
+| Storage key | Run `openssl rand -base64 32` once and paste the whole string (incl. the trailing `=`). **Keep it the same forever.** |
+| HA token / HA url | **Leave blank.** The add-on reaches Home Assistant through the Supervisor automatically. Only fill these to point at a non-add-on HA. |
 
 Press **Save**, then the **Info** tab → **Start**. Turn on **Start on boot** and
 **Watchdog** so it runs itself.
@@ -60,7 +59,9 @@ burns a key the ESP32 was holding. The ESP32 automatically tries its next key
 (up to 3) on the spot; if all are stale it flags the bank and Home Assistant can
 refill and retry. Optional automations for that are in
 [`HA_AUTOMATIONS.md`](https://github.com/addelovein/GlueHome/blob/main/HA_AUTOMATIONS.md).
-For snappy recovery, set **interval_seconds** to `15`.
+A lower **interval_seconds** reacts faster to a stale bank. It does **not** poll
+Glue more: the worker only calls Glue after an actual unlock — a full, idle bank
+makes zero Glue cloud calls, no matter the interval.
 
 **Not magic forever:** it depends on Glue's servers still being online to fetch
 new keys. If Glue's servers die, only the keys already on the ESP32 remain.

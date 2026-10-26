@@ -5,9 +5,10 @@ maintaining it. A small ESP32 by your door unlocks over Bluetooth; Home Assistan
 keeps it supplied with keys. For locks you own or are authorised to operate.
 Not affiliated with Glue.
 
-> **Status:** the protocol is proven on real lock hardware; the ESP32 firmware and
-> HA add-on are built and validated but **not yet run on a physical ESP32**.
-> Expect to debug the first flash.
+> **Status:** working end to end on real hardware — the lock unlocks from Home
+> Assistant via an ESP32-C3, and the key-refill add-on reports burns and refills
+> the pool automatically. Reliability depends on BLE range (a weak-antenna board
+> like the ESP32-C3 SuperMini should sit close to the lock).
 
 ---
 
@@ -180,9 +181,9 @@ python3 tools/validate_esphome.py --compile
 Install the latest stable ESPHome in a separate environment for the last two
 commands: `python3 -m pip install --upgrade 'esphome>=2026.9.1'`. The validator
 uses a temporary config with synthetic secrets and never uploads firmware.
-CI is configured to run Python regressions, host sanitizer checks and a firmware
-build against latest stable ESPHome, including a weekly compatibility check.
-CI has not been run remotely from this workspace.
+CI ("Offline and ESPHome checks") runs Python regressions, host sanitizer checks
+and a firmware build against latest stable ESPHome on every push, plus a weekly
+compatibility check. Recent runs are green.
 
 See [AUDIT.md](AUDIT.md) for the original findings and remediation evidence.
 `GLUE_APP_TECHNICAL_WRITEUP.md` and `ESPHOME_COMPONENT_PLAN.md` are historical

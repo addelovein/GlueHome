@@ -3,10 +3,10 @@
 End goal: your Glue lock appears as a `lock` entity in Home Assistant, driven by
 a small ESP32 over BLE, with Home Assistant refilling the single-use key pool.
 
-**Status of this path:** the firmware code compiles and validates, the BLE
-protocol is proven on real hardware (from a Mac), but the end-to-end run *on an
-ESP32* has not been done yet. Expect to debug the first flash. The three things
-ESPHome can't do for you are called out as **MANUAL** below.
+**Status of this path:** working end to end on real hardware — the lock has been
+unlocked from Home Assistant through an ESP32-C3. The main variable left is BLE
+reliability, which comes down to the board's antenna and how close it sits to the
+lock. The three things ESPHome can't do for you are called out as **MANUAL** below.
 
 Two separate systems do two separate jobs:
 
@@ -24,7 +24,9 @@ machine / HA, never on the ESP32.
 ## What you need
 
 - An **ESP32 dev board** (e.g. `esp32dev` / ESP32-WROOM, ~$5–10) and a USB cable.
-  Plain ESP32; not required to be ESP32-S3/C3. The board sits within BLE range of
+  An **ESP32-C3 SuperMini** is the validated board, but note its onboard antenna
+  is weak — keep it close to the lock, or use a board with a better/external
+  antenna for reliable range. The board sits within BLE range of
   the lock (same room / through one wall).
 - **Home Assistant** running (any install type), to hold keys and show the lock.
 - **Python 3.10+** on a computer, to run `glue.py setup` and the refill worker.
@@ -99,7 +101,10 @@ ESPHome needs the lock's real hardware MAC, which a Mac BLE scan can't give you
      there.
 3. Put that real MAC into `mac_address:` in the YAML, save, and **flash again**.
 
-After this, the node connects to the lock on boot.
+After this, the node can reach the lock. It connects **on demand** — only when
+you operate the lock — and disconnects when idle, to save the lock's battery and
+leave it free for the Glue phone app. (It uses `auto_connect: true` in the YAML
+but gates the actual connection in firmware.)
 
 ## Step 5 — Add the node to Home Assistant
 
@@ -122,8 +127,9 @@ short:
 
 1. **Settings → Add-ons → Add-on Store → ⋮ → Repositories**, add this repo's URL.
 2. Install **Glue key-refill**, open **Configuration**, fill the boxes (your Glue
-   login, lock id/serial from Step 2, an HA token, and a one-time storage key),
-   **Save**, then **Start** with *Start on boot* + *Watchdog* on.
+   login, lock id/serial from Step 2, and a one-time storage key — leave HA
+   url/token blank; it uses the Supervisor proxy), **Save**, then **Start** with
+   *Start on boot* + *Watchdog* on.
 
 It reports used keys to Glue and sends fresh ones to the ESP32 so the bank
 self-heals toward 5. The first successful run records **ESPHome as the owner** of

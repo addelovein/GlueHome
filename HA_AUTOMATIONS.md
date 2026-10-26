@@ -28,9 +28,10 @@ burned several keys elsewhere) falls through to the cloud refill.
   - a lock entity, e.g. `lock.entrance`
   - `sensor.glue_bank_status` (the JSON bank status)
   - `sensor.glue_keys_remaining`
-- The **Glue key-refill add-on** is installed and running (it pushes fresh keys
-  on its interval). For snappy recovery, set its `interval_seconds` to something
-  short like `15`.
+- The **Glue key-refill add-on** is installed and running. It reconciles HA state
+  on its loop but only calls Glue's cloud after an actual unlock (a full, idle
+  bank makes zero Glue calls). A lower `interval_seconds` just makes it react to a
+  stale bank faster; it does not increase cloud polling.
 
 ## 1. Expose "stale" as its own sensor (helper)
 

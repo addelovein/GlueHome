@@ -6,8 +6,10 @@ and setup instructions are in `README.md`; remediation and validation evidence
 are in `AUDIT.md`. The component targets latest stable ESPHome, minimum 2026.9.1.
 Durable key reservations, pending-burn reporting/acknowledgements and an HA REST
 refill worker (`glue.py sync --watch`) are now implemented and tested offline.
-Older TODO/API-validation statements below are historical. Real firmware build,
-physical BLE and end-to-end cloud/HA checks remain outstanding.
+Older TODO/API-validation statements below are historical. The firmware build,
+physical BLE unlock, and end-to-end cloud/HA refill are all **validated on real
+hardware** (an ESP32-C3 unlocking the lock from Home Assistant) — treat any
+"outstanding / awaits hardware" note further down as historical.
 
 ---
 
@@ -48,6 +50,11 @@ Three trust zones. The guiding rule: **the ESP32 never holds your Glue password,
 The ESP32 is **not** involved here. HA obtains a Cognito **access-token JWT** and uses it as `Authorization: Bearer` against `https://mobile.gluehome.com/api/`.
 
 ### 2a. Credential storage
+> **Current state:** the tools now use a cross-platform store under keyring
+> service **`glue-local`** (macOS Keychain / Windows Credential Locker / Linux
+> Secret Service), or an encrypted file for headless use. The `claude/gluehome/*`
+> names below are historical (an early local-dev layout).
+
 **Local dev (this machine): macOS Keychain** — the tools read via the `tools/glue` wrapper, nothing in plaintext. Service names (`-a "$USER"`):
 - `claude/gluehome/username`, `claude/gluehome/password` — your Glue login (the real secrets)
 - `claude/gluehome/cognito-client` = `65tpra3b7ktm1ivv9a8nmop15p` (Android app client)

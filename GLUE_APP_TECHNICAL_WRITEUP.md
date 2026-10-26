@@ -151,15 +151,21 @@ GET  /api/v1/privacy-policy                   [NO auth]
 **Stack:** RxAndroidBle2 + Nordic DFU. No raw GATT, **no app-initiated bonding/MTU negotiation** — link security left to lock firmware. Writes chunked at **20 bytes**.
 
 ### GATT UUIDs
+> **On-device correction (verified on GL04A fw 0.32).** The actual GATT differs
+> from the UUIDs the app's enum implies. The lock exposes ONE service
+> **`fec3892f-e506-4956-89c8-9bb5934e3121`** containing all three characteristics
+> below. `LOCK_PROTOCOL` is **write + INDICATE** (not notify); `WAKE_UP` is
+> **write-with-response**; `HOST_READY` is **notify** and carries the wake ack
+> (a single `0x01`). A GATT lookup must use the service UUID, not the
+> LOCK_PROTOCOL characteristic UUID. All writes must be write-with-response.
+
 | Kind | UUID | Meaning |
 |---|---|---|
-| Service | `E4B264D7-4E56-424F-8B5C-D4089EA216EF` | **Lock service** |
-| Service | `D2E11BA3-E5B6-4BF8-8AA0-8AF6B648B52C` | **Hub service** |
+| **Service (on-device)** | `fec3892f-e506-4956-89c8-9bb5934e3121` | **Lock service** holding all 3 chars below |
+| Char | `LOCK_PROTOCOL` = `E4B264D7-4E56-424F-8B5C-D4089EA216EF` | lock command/response — **write + indicate** |
+| Char | `WAKE_UP` = `94A8DFD9-49F7-4365-95D2-D2B94624B72C` | wake (raw `0x01`) — **write-with-response** |
+| Char | `HOST_READY` = `8E939CFF-3D83-4F61-8EB9-B5F25D39C15C` | **notify** — wake ack (`0x01`) |
 | Service | `0000FE59-...` | Nordic **DFU** (firmware) |
-| Char | `LOCK_PROTOCOL` = `E4B264D7-4E56-424F-8B5C-D4089EA216EF` | lock command/response |
-| Char | `HUB_PROTOCOL` = `D2E11BA5-E5B6-4BF8-8AA0-8AF6B648B52C` | hub command/response |
-| Char | `WAKE_UP` = `94A8DFD9-49F7-4365-95D2-D2B94624B72C` | wake (raw `0x01`) |
-| Char | `HOST_READY` = `8E939CFF-3D83-4F61-8EB9-B5F25D39C15C` | |
 
 ### Frame format (`BLEProtocol$Packet`)
 ```
@@ -265,7 +271,7 @@ Source: Charles Proxy captures of the **iOS** Glue app (lock-ios v3.6.0) on the 
 ### Account / lock identity (confirmed live)
 | Item | Value |
 |---|---|
-| Property | <YOUR_PROPERTY> (name/postcode/owner redacted) |
+| Property | `<YOUR_PROPERTY>` (name/postcode/owner redacted) |
 | User id (`sub`) | `<YOUR_COGNITO_SUB_UUID>` |
 | Door / Lock id | `<YOUR_LOCK_ID>` ("Entrance") |
 | **Lock serial (= BLE scan name)** | **`GL04A.DLXXXX.XXXX`** |
@@ -383,11 +389,11 @@ Since the lock won't self-report, state comes from owner-added sensing. Two appr
 Goal: expose the lock as a native HA `lock` entity, cloud-independent for the *operation*, via an ESP32 near the door.
 
 - **Why a custom C++ external component (not plain YAML):** the protocol is stateful/computed — CRC-16/CCITT per frame, the 3-byte challenge echo, 20-byte-chunked GATT writes, frame assembly `[cmd][len LE][challenge][payload][crc LE]`, and next-unused-key selection. Not expressible in declarative YAML. Port `FrameBuilder`/`BLEProtocol`/CRC from §4/§9 into an `esphome::Component` using `esp32_ble_client`.
-- **BLE target:** scan name = **`GL04A.DLXXXX.XXXX`**; lock service `E4B264D7-4E56-424F-8B5C-D4089EA216EF`; write/notify on `LOCK_PROTOCOL`; wake via `WAKE_UP` char (raw `0x01`).
+- **BLE target:** scan name = **`GL04A.DLXXXX.XXXX`**; lock service `fec3892f-e506-4956-89c8-9bb5934e3121` (on-device; not the LOCK_PROTOCOL char UUID); command/response on `LOCK_PROTOCOL` (**indicate**); wake via `WAKE_UP` char (raw `0x01`, write-with-response); wake ack on `HOST_READY` (**notify**).
 - **Unlock/lock sequence:** wake → `LOG_IN(0x19, offline key)` → `OPERATE(0x32, 0x00 unlock / 0x01 lock)`; read response status for state confirmation (§11).
 - **Key supply (the hard constraint):** 5-key rolling pool, server-refilled on consume (§8). Design: **HA holds Cognito creds, mints a token, calls `GET /glue-osm-devices/{id}/keys`, pushes the bank to the ESP32**; ESP32 unlocks offline from the bank; a burn is reported so the server advances the window. Works while Glue's API lives; **not Glue-proof** (that's §10's hardware track).
 - **State:** per §11 — owner sensor(s) + OPERATE response confirmation.
-- **Validate first:** one throwaway `bleak` run of the unlock sequence against the physical lock before committing to C++ (also probe `BOLT_POSITION_*` to see if GL04 firmware answers).
+- **Validated (done):** the §4/§9 unlock sequence was proven against the physical lock (via `bleak`, then the ESP32 firmware) — the lock unlocks from HA. The on-device GATT correction (service `fec3892f…`, LOCK_PROTOCOL = indicate, HOST_READY wake ack) came out of this. `BOLT_POSITION_*` on GL04 still worth probing for free real-state.
 
 ---
 
@@ -396,7 +402,7 @@ Goal: expose the lock as a native HA `lock` entity, cloud-independent for the *o
 - [ ] Read APPROTECT state (the go/no-go gate for everything downstream).
 - [ ] If readable: dump flash, load in Ghidra, locate key-verification + any embedded key.
 - [ ] While lock is open for SWD: fit the **internal bolt reed/Hall sensor** (Option A, §11) — one teardown, both jobs.
-- [ ] Validate the §4/§9 unlock sequence once against the physical lock with a throwaway `bleak` script before committing to C++.
+- [x] Validate the §4/§9 unlock sequence against the physical lock — **done**; the ESP32 firmware now unlocks the lock from HA.
 - [ ] `bleak` probe: does GL04 firmware answer `BOLT_POSITION_ENABLE`/`GET_STATE` despite the app's GL05 gate? (free real-state if yes.)
 - [ ] Build ESPHome component (§12): door-reed + config-selectable close behavior first; optional bolt/Hall GPIO input; HA-driven key refresh.
 - [ ] Decide credential route for key refresh: live Bearer capture vs. Cognito self-auth in HA (token TTL = 60 min).

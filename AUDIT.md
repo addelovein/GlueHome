@@ -1,6 +1,6 @@
 # GlueHome audit — 2026-10-15
 
-**Remediation update:** the actionable findings below have been addressed in source and offline regression tests. The ESPHome API finding is corrected: the project targets latest stable ESPHome (2026.9.1 at this review), which does provide `BLEClientBase::register_for_notify()`. The call is retained; the namespace issue is fixed. Target compilation and physical/cloud/HA validation remain open, so this is not yet a hardware acceptance sign-off.
+**Remediation update:** the actionable findings below have been addressed in source and offline regression tests. The ESPHome API finding is corrected: the project targets latest stable ESPHome (2026.9.1 at this review), which does provide `BLEClientBase::register_for_notify()`. The call is retained; the namespace issue is fixed. **Hardware validation since complete:** the firmware has since been built, flashed to an ESP32-C3, and used to unlock the lock end-to-end from Home Assistant, with the key-refill add-on reporting burns and refilling the pool; CI ("Offline and ESPHome checks") builds against latest stable ESPHome and passes. The historical findings below predate that. (Original note, now superseded: "Target compilation and physical/cloud/HA validation remain open, so this is not yet a hardware acceptance sign-off.")
 
 | Original finding | Remediation |
 | --- | --- |
