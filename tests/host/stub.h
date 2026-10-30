@@ -33,10 +33,13 @@ struct Preferences{template<class T>ESPPreferenceObject make_preference(uint32_t
 inline Preferences prefs;inline Preferences*global_preferences=&prefs;
 template<class T>class Parented{protected:T*parent_{};};
 namespace esp32_ble_tracker{enum class ClientState{IDLE,ESTABLISHED};}
-namespace esp32_ble{struct ESPBTUUID{static ESPBTUUID from_raw(const char*){return {};}};}
+namespace esp32_ble{struct ESPBTUUID{std::string s;static ESPBTUUID from_raw(const char*u){return {u?u:""};}};}
+// Tests set this to a service UUID that should NOT carry the chars, to exercise
+// the firmware's multi-service fallback (GL05 uses a different service UUID).
+inline std::string missing_service;
 namespace ble_client {
 struct Characteristic{uint16_t handle=1;};
-class BLEClient {public:int disconnects=0;bool enabled=true;void set_enabled(bool e){if(e==enabled)return;enabled=e;if(!e)++disconnects;}int get_gattc_if(){return 0;}int get_conn_id(){return 0;}uint64_t get_address(){return 123;}int register_for_notify(int){return 0;}void disconnect(){++disconnects;}Characteristic*get_characteristic(esp32_ble::ESPBTUUID,esp32_ble::ESPBTUUID){static Characteristic c;return &c;}Characteristic*get_config_descriptor(int){static Characteristic c{2};return &c;}};
+class BLEClient {public:int disconnects=0;bool enabled=true;void set_enabled(bool e){if(e==enabled)return;enabled=e;if(!e)++disconnects;}int get_gattc_if(){return 0;}int get_conn_id(){return 0;}uint64_t get_address(){return 123;}int register_for_notify(int){return 0;}void disconnect(){++disconnects;}Characteristic*get_characteristic(esp32_ble::ESPBTUUID svc,esp32_ble::ESPBTUUID){if(!missing_service.empty()&&svc.s==missing_service)return nullptr;static Characteristic c;return &c;}Characteristic*get_config_descriptor(int){static Characteristic c{2};return &c;}};
 class BLEClientNode {public:virtual void gattc_event_handler(esp_gattc_cb_event_t,esp_gatt_if_t,esp_ble_gattc_cb_param_t*){};esp32_ble_tracker::ClientState node_state=esp32_ble_tracker::ClientState::ESTABLISHED;BLEClient*parent(){return &client_;}private:BLEClient client_;};
 }
 namespace lock{enum LockState{LOCK_STATE_NONE,LOCK_STATE_LOCKED,LOCK_STATE_UNLOCKED,LOCK_STATE_JAMMED,LOCK_STATE_LOCKING,LOCK_STATE_UNLOCKING};struct LockCall{int get_state()const{return 0;}};struct Traits{void set_assumed_state(bool){}};class Lock{public:int state=0;Traits traits;virtual void control(const LockCall&){};void publish_state(int s){state=s;}};}

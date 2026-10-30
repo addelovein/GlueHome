@@ -11,13 +11,25 @@ static const char *const TAG = "glue_lock";
 // Verified on-device (GL04A fw 0.32): LOCK_PROTOCOL is write + INDICATE (not notify),
 // WAKE_UP is write-with-response, and the wake ack (0x01) arrives on HOST_READY (notify).
 // All writes must be WRITE_TYPE_RSP; write-without-response is silently dropped.
-// The three characteristics live under this service (confirmed on-device). The
-// service UUID is NOT the LOCK_PROTOCOL characteristic UUID — a GATT lookup must
-// use UUID_SERVICE, or ESP-IDF's get_characteristic(service, char) finds nothing.
-static const char *UUID_SERVICE = "fec3892f-e506-4956-89c8-9bb5934e3121";
+// The three characteristic UUIDs are identical across hardware (GL04 and GL05,
+// confirmed against the app's dex: one shared Characteristic enum). What differs
+// is the SERVICE UUID that wraps them: GL04 uses fec3892f; GL05 (LOCK_V3, fw 2.x)
+// uses a different one. The Android app never trips on this because rxandroidble2
+// finds characteristics by char-UUID across all services; ESP-IDF's
+// get_characteristic(service, char) needs the right service. So we try each
+// service the app knows and use the first that yields all three chars — model
+// agnostic, no per-lock config needed. The matched service is logged.
 static const char *UUID_LOCK_PROTOCOL = "e4b264d7-4e56-424f-8b5c-d4089ea216ef";
 static const char *UUID_WAKE_UP = "94a8dfd9-49f7-4365-95d2-d2b94624b72c";
 static const char *UUID_HOST_READY = "8e939cff-3d83-4f61-8eb9-b5f25d39c15c";
+// Candidate lock-service UUIDs, from the app's scan filters (s5.a domains).
+// fec3892f = GL04 lock service; the others are the remaining lock-family services
+// the app advertises for. First one carrying all three chars wins.
+static const char *CANDIDATE_SERVICES[] = {
+    "fec3892f-e506-4956-89c8-9bb5934e3121",  // GL04 lock service
+    "e4b264d7-4e56-424f-8b5c-d4089ea216ef",  // lock-protocol service domain
+    "d2e11ba3-e5b6-4bf8-8aa0-8af6b648b52c",  // additional lock-family service
+};
 // Covers on-demand connect: the lock advertises every few seconds, connect +
 // service discovery ~3s, then wake/login/operate.
 constexpr uint32_t OP_TIMEOUT_MS = 25000;
@@ -233,13 +245,29 @@ void GlueLockHub::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
     case ESP_GATTC_SEARCH_CMPL_EVT: {
       handles_ready_ = false;
       notify_registered_ = false;
-      // All three characteristics live under UUID_SERVICE. LOCK_PROTOCOL carries
-      // command/response (indicate), HOST_READY the wake ack (notify), WAKE_UP is write-only.
-      const auto svc = esp32_ble::ESPBTUUID::from_raw(UUID_SERVICE);
-      auto *lc = parent()->get_characteristic(svc, esp32_ble::ESPBTUUID::from_raw(UUID_LOCK_PROTOCOL));
-      auto *wc = parent()->get_characteristic(svc, esp32_ble::ESPBTUUID::from_raw(UUID_WAKE_UP));
-      auto *rc = parent()->get_characteristic(svc, esp32_ble::ESPBTUUID::from_raw(UUID_HOST_READY));
-      if (!lc || !wc || !rc) { ESP_LOGE(TAG, "Missing Glue characteristics"); break; }
+      // Find the service that carries all three chars. LOCK_PROTOCOL carries
+      // command/response (indicate), HOST_READY the wake ack (notify), WAKE_UP is
+      // write-only. Try each candidate service (GL04 fec3892f first, then the GL05
+      // / lock-family services) so one firmware serves every model.
+      const auto lp = esp32_ble::ESPBTUUID::from_raw(UUID_LOCK_PROTOCOL);
+      const auto wu = esp32_ble::ESPBTUUID::from_raw(UUID_WAKE_UP);
+      const auto hr = esp32_ble::ESPBTUUID::from_raw(UUID_HOST_READY);
+      // Use the real return type of get_characteristic without naming it (the host
+      // test stub and ESP-IDF use different type names for the characteristic).
+      using CharPtr = decltype(parent()->get_characteristic(lp, lp));
+      CharPtr lc = nullptr, wc = nullptr, rc = nullptr;
+      for (const char *svc_uuid : CANDIDATE_SERVICES) {
+        const auto svc = esp32_ble::ESPBTUUID::from_raw(svc_uuid);
+        auto *l = parent()->get_characteristic(svc, lp);
+        auto *w = parent()->get_characteristic(svc, wu);
+        auto *r = parent()->get_characteristic(svc, hr);
+        if (l && w && r) {
+          lc = l; wc = w; rc = r;
+          ESP_LOGI(TAG, "Glue characteristics found under service %s", svc_uuid);
+          break;
+        }
+      }
+      if (!lc || !wc || !rc) { ESP_LOGE(TAG, "Missing Glue characteristics (tried all candidate services)"); break; }
       lock_char_handle_ = lc->handle;
       wake_char_handle_ = wc->handle;
       ready_char_handle_ = rc->handle;

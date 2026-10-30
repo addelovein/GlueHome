@@ -98,5 +98,13 @@ int main(){
  assert(ct.idle()&&ct.keys_remaining()==1&&!ct.enabled()); // timed out mid-connect: key NOT burned, disconnected
  // Idle loop keeps the client disabled (battery saver) even if nothing is happening.
  reset();Hub idle;idle.init("idle");idle.disconnected();assert(!idle.enabled());idle.loop();assert(!idle.enabled());
- std::cout<<"PASS: wake failure, wake ack + fallback, KEY_EXPIRED retry + cap + stale signal, non-expired no-retry, on-demand connect + connect-timeout keeps key + idle-disable, reply correlation, durable reservation/reboot, timeout, bank isolation/capacity, persistence failure, CRC/length, fragmentation, controller handoff\n";
+ // GL05 service fallback: the GL04 service UUID carries no chars (simulated), so
+ // discovery must fall through to a later candidate service and still operate.
+ reset();missing_service="fec3892f-e506-4956-89c8-9bb5934e3121"; // GL04 service "missing"
+ Hub gl05;gl05.init("gl05");glue_lock::GlueLock g5;gl05.set_lock_entity(&g5);gl05.add_offline_key(1,"synthetic");
+ gl05.disconnected();gl05.request_lock();gl05.connect_complete();gl05.wake_ack();gl05.loop();
+ gl05.reply(glue::CMD_LOG_IN);gl05.reply(glue::CMD_OPERATE);
+ assert(g5.state==lock::LOCK_STATE_LOCKED&&gl05.idle()); // found chars under a fallback service
+ missing_service.clear();
+ std::cout<<"PASS: wake failure, wake ack + fallback, KEY_EXPIRED retry + cap + stale signal, non-expired no-retry, on-demand connect + connect-timeout keeps key + idle-disable, GL05 service fallback, reply correlation, durable reservation/reboot, timeout, bank isolation/capacity, persistence failure, CRC/length, fragmentation, controller handoff\n";
 }
