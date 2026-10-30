@@ -1,6 +1,12 @@
-#!/usr/bin/env bash
+#!/command/with-contenv bash
 # Glue key-refill worker entrypoint. Reads add-on options, maps them to the
 # GLUE_* env the CLI expects, and reconciles the ESPHome key bank on a loop.
+#
+# The `with-contenv` shebang is REQUIRED: it loads the container environment
+# the Supervisor injects (including SUPERVISOR_TOKEN) from
+# /var/run/s6/container_environment. A plain `#!/usr/bin/env bash` runs without
+# that env, so SUPERVISOR_TOKEN is empty and HA access fails even though
+# homeassistant_api: true is set. (HA developer docs, add-on tutorial.)
 set -euo pipefail
 
 OPTS=/data/options.json
