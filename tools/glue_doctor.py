@@ -148,7 +148,9 @@ def section_ha(lock_id):
     print()
     if nodes:
         for n in sorted(nodes):
-            kv(">> ESPHome node name", n + "   (use THIS as 'ESP device' in the add-on)")
+            kv(">> entity-id prefix", n + "   (used for the Bank sensor name)")
+        print("   NOTE: the 'ESP device' field needs the SERVICE prefix, which can")
+        print("   differ from this. See the services list + section 3 below.")
     else:
         print(">> Could not derive the node name automatically.")
         print("   Look in the ESPHome dashboard for the node's name (top of the card).")
@@ -184,17 +186,39 @@ def section_ha(lock_id):
 # =====================================================================
 # 3. Add-on config: validate the values
 # =====================================================================
+def _service_prefix():
+    """The ESPHome node name = the prefix of its registered API services.
+    This is what the add-on's ESP device MUST be — NOT the entity-id prefix,
+    which can differ (entity ids use friendly_name/area, services use name:)."""
+    try:
+        services = _ha_get("services")
+        esph = next((d for d in services if d.get("domain") == "esphome"), None)
+        for nm in (esph or {}).get("services", {}):
+            m = re.match(r"(.+)_add_key$", nm)
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
 def _derive_expected(lock_id, serial):
-    """Best-effort expected add-on values from HA + setup, for the user to copy."""
+    """Best-effort expected add-on values from HA + setup, for the user to copy.
+    ha_device comes from the SERVICE prefix (authoritative); the bank sensor
+    comes from the entity id. The two prefixes may legitimately differ."""
     exp = {"lock_id": lock_id or "", "lock_serial": serial or ""}
+    # ha_device = the service prefix (what the worker actually calls).
+    svc = _service_prefix()
+    if svc:
+        exp["ha_device"] = svc
     try:
         states = _ha_get("states")
         for s in states:
             eid = s.get("entity_id", "").lower()
             m = re.match(r"sensor\.(.+)_glue_bank_status$", eid)
             if m:
-                exp["ha_device"] = m.group(1)
                 exp["ha_bank_entity"] = s["entity_id"]
+                exp.setdefault("ha_device", m.group(1))  # fallback only
                 break
     except Exception:
         pass
@@ -208,6 +232,15 @@ def section_addon(lock_id, serial):
         print("Copy these into the add-on Configuration tab (then press Spara/Save):\n")
         kv("  ESP device", exp.get("ha_device", "<node name from section 2>"))
         kv("  Bank sensor", exp.get("ha_bank_entity", "sensor.<node>_glue_bank_status"))
+        # Warn when the service prefix and the entity prefix differ, so the ESP
+        # device value (service prefix) is not "corrected" to match the sensor.
+        bank = exp.get("ha_bank_entity", "")
+        bm = re.match(r"sensor\.(.+)_glue_bank_status$", bank)
+        if exp.get("ha_device") and bm and exp["ha_device"] != bm.group(1):
+            print(f"  NOTE: 'ESP device' ({exp['ha_device']}) and the Bank sensor prefix "
+                  f"({bm.group(1)}) differ.")
+            print("        That is EXPECTED — ESP device uses the node's name:, the sensor")
+            print("        uses its entity id. Use the values exactly as shown above.")
         kv("  Lock id", exp.get("lock_id", "<from setup>"))
         kv("  Lock serial", exp.get("lock_serial", "<from setup>"))
         print("  (Glue username/password + storage_key: as before; not shown here.)")
