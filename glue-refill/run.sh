@@ -36,7 +36,14 @@ fail() { echo "FATAL: $*" >&2; exit 1; }
 [ -n "$GLUE_USERNAME" ]  || fail "glue_username is required"
 [ -n "$GLUE_PASSWORD" ]  || fail "glue_password is required"
 [ -n "$GLUE_STORAGE_KEY" ] || fail "storage_key is required (generate: openssl rand -base64 32)"
-[ -n "${SUPERVISOR_TOKEN:-}${GLUE_HA_URL:-}" ] || fail "no HA access: SUPERVISOR_TOKEN missing and no ha_url set"
+[ -n "${SUPERVISOR_TOKEN:-}${GLUE_HA_URL:-}" ] || fail "no HA access: the Supervisor did not grant API access (SUPERVISOR_TOKEN missing).
+  This almost always means the add-on is running a STALE build without the
+  homeassistant_api permission. Fix: open the add-on -> three-dots menu ->
+  Rebuild, and confirm the version is >= 0.2.3. If Rebuild does not help,
+  uninstall the add-on, remove+re-add this repository in the Add-on Store,
+  then reinstall (the github cache is sticky).
+  Only if you are NOT on HA OS/Supervised (no Supervisor at all): set ha_url
+  + ha_token in the add-on config to reach Home Assistant directly."
 
 echo "Glue refill worker starting (device=$GLUE_HA_DEVICE, interval=${INTERVAL}s, ha=$([ -n "${GLUE_HA_URL:-}" ] && echo "$GLUE_HA_URL" || echo supervisor-proxy))."
 
