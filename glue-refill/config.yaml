@@ -3,7 +3,7 @@
 # credentials and refills the ESP32's single-use key bank over HA's API. The
 # ESP32 itself never holds credentials and never touches the cloud.
 name: Glue key-refill worker
-version: "0.2.2"
+version: "0.2.3"
 slug: glue_refill
 description: Refills the ESPHome Glue lock's single-use key pool via Home Assistant.
 arch:
@@ -37,7 +37,9 @@ schema:
   # OPTIONAL (trailing ?) — omit them to use the Supervisor's Core API proxy.
   ha_url: "url?"
   ha_token: "password?"
-  ha_device: "match(^[a-z0-9][a-z0-9-]*$)"
+  # ESPHome node name: lowercase letters/digits with hyphens or underscores
+  # (ESPHome slugs commonly use underscores, e.g. kontoret_glue_...).
+  ha_device: "match(^[a-z0-9][a-z0-9_-]*$)"
   ha_bank_entity: "match(^sensor\\.[a-z0-9_]+$)"
   lock_id: "match(^[0-9a-fA-F-]{36}$)"
   lock_serial: "str"

@@ -49,9 +49,9 @@ def kv(label, value=""):
 # ---- the add-on's real schema rules, mirrored so we can explain failures -----
 # Must stay in step with glue-refill/config.yaml `schema:`.
 ADDON_RULES = [
-    ("ha_device", r"^[a-z0-9][a-z0-9-]*$",
-     "ESP device = your ESPHome NODE name: lowercase letters/digits/hyphens only, "
-     "no capitals, no spaces, no dots."),
+    ("ha_device", r"^[a-z0-9][a-z0-9_-]*$",
+     "ESP device = your ESPHome NODE name: lowercase letters/digits with hyphens "
+     "or underscores, no capitals, no spaces, no dots."),
     ("ha_bank_entity", r"^sensor\.[a-z0-9_]+$",
      "Bank sensor = a sensor entity id like sensor.<node>_glue_bank_status "
      "(lowercase, underscores)."),
