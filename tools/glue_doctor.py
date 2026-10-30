@@ -90,10 +90,17 @@ def section_lock():
 # =====================================================================
 # 2. Home Assistant entities + ESPHome services
 # =====================================================================
+def _env(name):
+    # On Windows cmd, `set X="..."` keeps the quotes in the value, so a URL can
+    # arrive as '"http://...' and break urlsplit. Strip surrounding quotes/space.
+    v = os.environ.get(name)
+    return v.strip().strip('"').strip("'") if v else v
+
+
 def _ha_get(path):
     import urllib.request
-    url = os.environ.get("GLUE_HA_URL")
-    token = os.environ.get("GLUE_HA_TOKEN")
+    url = _env("GLUE_HA_URL")
+    token = _env("GLUE_HA_TOKEN")
     sup = os.environ.get("SUPERVISOR_TOKEN")
     if url and token:
         base, bearer = url.rstrip("/") + "/api", token
