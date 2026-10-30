@@ -146,6 +146,33 @@ def section_ha(lock_id):
         print(">> Could not derive the node name automatically.")
         print("   Look in the ESPHome dashboard for the node's name (top of the card).")
 
+    # The refill worker pushes keys via esphome.<node>_add_key etc. A 400 on that
+    # call means the service name does not exist (wrong node, node offline, or the
+    # node YAML does not define the services). List what HA actually exposes.
+    print()
+    print("ESPHome services HA actually exposes (the worker needs <node>_add_key etc.):")
+    try:
+        services = _ha_get("services")
+        esph = next((d for d in services if d.get("domain") == "esphome"), None)
+        names = sorted((esph or {}).get("services", {}).keys())
+        if not names:
+            print("  ** No esphome services found ** — is the ESPHome integration loaded")
+            print("     and the node online? Services only exist while the node is connected.")
+        else:
+            for nm in names:
+                kv("  esphome." + nm)
+            needed = ["add_key", "ack_burn", "retire_keys", "resume_keys"]
+            for n in sorted(nodes) or [""]:
+                print(f"  -- for node '{n}':")
+                for suf in needed:
+                    want = f"{n}_{suf}"
+                    ok = want in names
+                    kv(f"     {suf}", f"esphome.{want}  ->  {'PRESENT' if ok else '** MISSING **'}")
+    except RuntimeError:
+        print("  Skipped — no HA token.")
+    except Exception as e:
+        print(f"  Could not list services: {type(e).__name__}: {e}")
+
 
 # =====================================================================
 # 3. Add-on config: validate the values
